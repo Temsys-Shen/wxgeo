@@ -34,6 +34,7 @@ impl Ca {
         let ca_key_pem = kp.serialize_pem();
         fs::write(&cert_path, &ca_pem)?;
         fs::write(&key_path, &ca_key_pem)?;
+        crate::config::fix_owner(&dir);
         Ok(Ca { ca_pem, ca_key_pem })
     }
 

@@ -23,6 +23,25 @@ fn which(c: &str) -> bool {
 
 fn env_file() -> PathBuf { crate::config::app_dir().join("proxy-env.sh") }
 
+#[cfg(target_os = "linux")]
+fn lrun(prog: &str, args: &[&str]) -> (i32, String, String) {
+    let mut cmd = if let Some(u) = crate::config::sudo_user() {
+        let mut c = Command::new("sudo");
+        c.arg("-u").arg(u).arg(prog);
+        c
+    } else {
+        Command::new(prog)
+    };
+    match cmd.args(args).output() {
+        Ok(o) => (
+            o.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&o.stdout).to_string(),
+            String::from_utf8_lossy(&o.stderr).to_string(),
+        ),
+        Err(e) => (127, String::new(), e.to_string()),
+    }
+}
+
 pub fn trust_ca() -> Result<()> {
     let cert = crate::ca::ca_pem_path();
     let c = cert.to_string_lossy().to_string();
@@ -43,12 +62,17 @@ pub fn trust_ca() -> Result<()> {
     #[cfg(target_os = "linux")]
     {
         let dst = "/usr/local/share/ca-certificates/wxgeo.crt";
-        let (rc, _, _) = run("sudo", &["-n", "cp", &c, dst]);
-        if rc != 0 {
+        if crate::config::is_root() {
             std::fs::copy(&cert, dst).map_err(|e| anyhow!("复制 CA 失败: {e}"))?;
+            run("update-ca-certificates", &[]);
+        } else {
+            let (rc, _, _) = run("sudo", &["-n", "cp", &c, dst]);
+            if rc != 0 {
+                std::fs::copy(&cert, dst).map_err(|e| anyhow!("复制 CA 失败（需要 root，请用 sudo wxgeo 运行）: {e}"))?;
+            }
+            run("sudo", &["-n", "update-ca-certificates"]);
+            run("update-ca-certificates", &[]);
         }
-        run("sudo", &["-n", "update-ca-certificates"]);
-        run("update-ca-certificates", &[]);
         return Ok(());
     }
     #[allow(unreachable_code)]
@@ -71,10 +95,15 @@ pub fn untrust_ca() -> Result<()> {
     {
         let dst = "/usr/local/share/ca-certificates/wxgeo.crt";
         if std::path::Path::new(dst).exists() {
-            let (rc, _, _) = run("sudo", &["-n", "rm", "-f", dst]);
-            if rc != 0 { let _ = std::fs::remove_file(dst); }
-            run("sudo", &["-n", "update-ca-certificates"]);
-            run("update-ca-certificates", &[]);
+            if crate::config::is_root() {
+                let _ = std::fs::remove_file(dst);
+                run("update-ca-certificates", &[]);
+            } else {
+                let (rc, _, _) = run("sudo", &["-n", "rm", "-f", dst]);
+                if rc != 0 { let _ = std::fs::remove_file(dst); }
+                run("sudo", &["-n", "update-ca-certificates"]);
+                run("update-ca-certificates", &[]);
+            }
         }
         return Ok(());
     }
@@ -136,6 +165,7 @@ fn write_env(on: bool, port: u16) -> String {
         "# wxgeo 代理已关闭\nexport http_proxy=\nexport https_proxy=\nexport HTTP_PROXY=\nexport HTTPS_PROXY=\n".to_string()
     };
     let _ = std::fs::write(&p, body);
+    crate::config::fix_owner(&p);
     p.to_string_lossy().to_string()
 }
 
@@ -180,13 +210,13 @@ pub fn system_proxy(on: bool, port: u16) -> Result<String> {
         match b {
             "gnome" => {
                 if on {
-                    run("gsettings", &["set", "org.gnome.system.proxy", "mode", "manual"]);
+                    lrun("gsettings", &["set", "org.gnome.system.proxy", "mode", "manual"]);
                     for sch in ["org.gnome.system.proxy.http", "org.gnome.system.proxy.https"] {
-                        run("gsettings", &["set", sch, "host", "127.0.0.1"]);
-                        run("gsettings", &["set", sch, "port", &port.to_string()]);
+                        lrun("gsettings", &["set", sch, "host", "127.0.0.1"]);
+                        lrun("gsettings", &["set", sch, "port", &port.to_string()]);
                     }
                 } else {
-                    run("gsettings", &["set", "org.gnome.system.proxy", "mode", "none"]);
+                    lrun("gsettings", &["set", "org.gnome.system.proxy", "mode", "none"]);
                 }
                 return Ok("Linux gsettings（GNOME 系）".into());
             }
@@ -194,15 +224,15 @@ pub fn system_proxy(on: bool, port: u16) -> Result<String> {
                 let kc = if which("kwriteconfig6") { "kwriteconfig6" } else { "kwriteconfig5" };
                 if which(kc) {
                     if on {
-                        run(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "1"]);
-                        run(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "httpProxy", &format!("http://127.0.0.1:{}", port)]);
-                        run(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "httpsProxy", &format!("http://127.0.0.1:{}", port)]);
-                        run(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "NoProxy", "localhost,127.0.0.1,::1"]);
+                        lrun(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "1"]);
+                        lrun(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "httpProxy", &format!("http://127.0.0.1:{}", port)]);
+                        lrun(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "httpsProxy", &format!("http://127.0.0.1:{}", port)]);
+                        lrun(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "NoProxy", "localhost,127.0.0.1,::1"]);
                     } else {
-                        run(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "0"]);
+                        lrun(kc, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "0"]);
                     }
                     if which("dbus-send") {
-                        run("dbus-send", &["--type=signal", "/KIO/Scheduler", "org.kde.KIO.Scheduler.reparseSlaveConfiguration", "string:"]);
+                        lrun("dbus-send", &["--type=signal", "/KIO/Scheduler", "org.kde.KIO.Scheduler.reparseSlaveConfiguration", "string:"]);
                     }
                     return Ok("Linux kioslaverc（KDE Plasma）".into());
                 }
@@ -238,13 +268,13 @@ pub fn system_proxy_on(port: u16) -> bool {
     {
         match linux_backend() {
             "gnome" => {
-                let (_, out, _) = run("gsettings", &["get", "org.gnome.system.proxy", "mode"]);
+                let (_, out, _) = lrun("gsettings", &["get", "org.gnome.system.proxy", "mode"]);
                 return out.contains("manual");
             }
             "kde" => {
                 let kr = if which("kreadconfig6") { "kreadconfig6" } else { "kreadconfig5" };
                 if which(kr) {
-                    let (_, out, _) = run(kr, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType"]);
+                    let (_, out, _) = lrun(kr, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType"]);
                     return out.trim() == "1";
                 }
                 return false;

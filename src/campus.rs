@@ -133,5 +133,6 @@ pub fn update_db() -> Result<usize> {
     all.sort_by(|a, b| a.name.cmp(&b.name).then(a.lat.partial_cmp(&b.lat).unwrap_or(std::cmp::Ordering::Equal)));
     let _ = std::fs::create_dir_all(crate::config::app_dir());
     std::fs::write(user_path(), serde_json::to_string(&all)?)?;
+    crate::config::fix_owner(&user_path());
     Ok(all.len())
 }

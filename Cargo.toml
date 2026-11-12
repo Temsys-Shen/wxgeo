@@ -1,6 +1,6 @@
 [package]
 name = "wxgeo"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "WeChat built-in browser geolocation spoofer (MITM proxy + TUI)"
 license = "MIT"

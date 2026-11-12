@@ -76,6 +76,9 @@ impl App {
 fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let _ = std::fs::create_dir_all(config::app_dir());
+    if cfg!(target_os = "linux") && !config::is_root() {
+        eprintln!("提示: Linux 下安装 CA 需要 root 权限，建议直接执行 sudo wxgeo；工具会自动沿用原用户配置，并以原用户身份设置桌面代理。");
+    }
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
     match cmd {

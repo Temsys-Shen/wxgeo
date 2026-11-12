@@ -75,6 +75,8 @@ cargo build --release
 | 系统代理 | networksetup | 自动识别：GNOME 系用 gsettings、KDE 用 kioslaverc、其它生成环境变量文件 | 注册表 Internet Settings（WinINET） |
 | 证书生成 | rcgen（纯 Rust） | rcgen | rcgen |
 
+Linux 提权说明：Linux 安装 CA 需要 root 权限，直接执行 `sudo wxgeo`。工具通过 SUDO_USER 沿用原用户配置目录（`~/.wxgeo`），并以原用户身份调用 gsettings、kwriteconfig 与 dbus-send，避免 root 与桌面会话不一致；写入的配置文件会 chown 回原用户。若未使用 sudo，信任 CA 会失败并提示。
+
 Linux 代理后端按顺序选择：
 
 1. 可用环境变量 WXGEO_PROXY_BACKEND=gnome 或 kde 或 env 强制指定。
