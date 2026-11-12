@@ -5,7 +5,7 @@ wxgeo 是面向微信内置浏览器（Chromium / flue 内核）的定位伪装�
 ## 功能
 
 - 目标站点可配置：域名列表或全站模式，按域名动态签发证书
-- 定位可配置：纬度、经度、精度
+- 定位可配置：纬度、经度、精度；内置全国高校校区库，可在界面检索选择，也可手工输入
 - 注入覆盖 `navigator.geolocation` 与 `wx.getLocation`
 - 站点特有校验可补充：单行自定义 JS 注入到 `<head>`
 - 交互界面（crossterm TUI）：启停代理、改坐标、改域名、信任 CA、系统代理一键切换
@@ -49,11 +49,23 @@ cargo build --release
 | `d` | 修改目标域名列表 |
 | `a` | 切换全站模式 |
 | `j` | 设置自定义 JS |
+| `u` | 检索并选择高校校区 |
 | `t` | 安装或移除本地 CA 信任 |
 | `p` | 开启或关闭系统代理 |
 | `r` | 重启代理 |
 | `l` | 清空日志 |
 | `q` | 退出 |
+
+## 高校校区库
+
+内置全国高校与校区坐标，来源 Wikidata，覆盖院校与主要校区。界面按 `u` 输入关键词（校名、城市、校区）检索，选择序号即写入坐标；也可按 `c` 手工输入经纬度。
+
+扩充数据：
+
+- `wxgeo --update-campus-db`：从 Wikidata 拉取院校与校区坐标，合并后写入 `~/.wxgeo/campuses.json`
+- 手工维护 `~/.wxgeo/campuses.json`，格式为数组，元素含 name、city、lat、lon
+
+内置数据为离线快照，覆盖范围以 Wikidata 收录为准。需要更完整的校区数据时，在网络可用环境执行更新，或导入自有数据文件。
 
 ## 平台差异
 
@@ -78,6 +90,7 @@ Linux 代理后端按顺序选择：
 - `wxgeo --plain`：文本界面
 - `wxgeo --selftest [URL]`：自检，生成 CA、启动代理、以 curl 验证注入
 - `wxgeo --headless`：前台运行代理并打印日志
+- `wxgeo --update-campus-db`：更新高校校区库到 `~/.wxgeo/campuses.json`
 
 ## CI 与发布
 

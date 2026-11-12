@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 mod ca;
+mod campus;
 mod config;
 mod inject;
 mod proxy;
@@ -83,9 +84,16 @@ fn main() {
             std::process::exit(selftest(&url));
         }
         "--headless" => headless(),
+        "--update-campus-db" => {
+            match campus::update_db() {
+                Ok(n) => println!("已更新 {} 条高校校区数据到 {}", n, campus::user_path().display()),
+                Err(e) => eprintln!("更新失败: {}", e),
+            }
+            std::process::exit(0);
+        }
         "--plain" => plain(),
         "--help" | "-h" => {
-            println!("wxgeo {}\n用法: wxgeo [--selftest [URL] | --headless | --plain]", env!("CARGO_PKG_VERSION"));
+            println!("wxgeo {}\n用法: wxgeo [--selftest [URL] | --headless | --plain | --update-campus-db]", env!("CARGO_PKG_VERSION"));
         }
         _ => tui(),
     }
@@ -154,7 +162,7 @@ fn plain() {
             app.proxy.as_ref().map(|p| p.count.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0));
         println!("坐标:{:.6},{:.6}  精度:{:.0}m  域名:{}", app.cfg.lat, app.cfg.lon, app.cfg.acc,
             if app.cfg.all_hosts { "*".to_string() } else { app.cfg.domains.join(",") });
-        println!("命令: s 启停  c 坐标  d 域名  a 全站  j 自定义JS  t 信任CA  p 系统代理  r 重启  q 退出");
+        println!("命令: s 启停  c 坐标  d 域名  a 全站  j 自定义JS  t 信任CA  p 系统代理  u 选校区  r 重启  q 退出");
         let mut line = String::new();
         print!("> ");
         let _ = io::stdout().flush();
@@ -184,6 +192,28 @@ fn plain() {
                 else { match sysproxy::trust_ca() { Ok(_) => app.push("已信任本地 CA".into()), Err(e) => app.push(format!("信任失败: {}", e)) } }
             }
             "p" => { let target = !app.sysproxy; app.set_sysproxy(target); }
+            "u" => {
+                let kw = ask_line("搜索高校/校区", "");
+                let list = campus::load();
+                let hits = campus::search(&list, &kw, 20);
+                if hits.is_empty() {
+                    println!("未找到: {}", kw);
+                } else {
+                    for (i, c) in hits.iter().enumerate() {
+                        println!("{:>2}. {} {} {:.6},{:.6}", i + 1, c.name, c.city, c.lat, c.lon);
+                    }
+                    let sel = ask_line("选择序号（回车取消）", "");
+                    if let Ok(n) = sel.parse::<usize>() {
+                        if n >= 1 && n <= hits.len() {
+                            let c = hits[n - 1];
+                            app.cfg.lat = c.lat;
+                            app.cfg.lon = c.lon;
+                            app.cfg.save();
+                            println!("已选择 {}（{:.6},{:.6}）", c.name, c.lat, c.lon);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -231,6 +261,29 @@ fn tui() {
                         }
                         Char('p') => { let t = !app.sysproxy; app.set_sysproxy(t); }
                         Char('l') => { app.shared.lock().unwrap().clear(); }
+                        Char('u') => {
+                            let kw = tui_prompt(&mut out, "搜索高校/校区", "")?;
+                            let list = campus::load();
+                            let hits = campus::search(&list, &kw, 20);
+                            if hits.is_empty() {
+                                app.push(format!("未找到: {}", kw));
+                            } else {
+                                app.push(format!("搜索结果 {} 条:", hits.len()));
+                                for (i, c) in hits.iter().enumerate() {
+                                    app.push(format!("{:>2}. {} {} {:.6},{:.6}", i + 1, c.name, c.city, c.lat, c.lon));
+                                }
+                                let sel = tui_prompt(&mut out, "选择序号（回车取消）", "")?;
+                                if let Ok(n) = sel.parse::<usize>() {
+                                    if n >= 1 && n <= hits.len() {
+                                        let c = hits[n - 1];
+                                        app.cfg.lat = c.lat;
+                                        app.cfg.lon = c.lon;
+                                        app.cfg.save();
+                                        app.push(format!("已选择 {}（{:.6},{:.6}）", c.name, c.lat, c.lon));
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -270,7 +323,7 @@ fn draw(out: &mut io::Stdout, app: &App) -> Result<()> {
     for (i, l) in logs.iter().skip(skip).enumerate() {
         execute!(out, cursor::MoveTo(0, (3 + i) as u16), Print(trunc(l, w)))?;
     }
-    let foot = " s 启停  c 坐标  d 域名  a 全站  j 自定义JS  t 信任CA  p 系统代理  r 重启  l 清屏  q 退出 ";
+    let foot = " s 启停  c 坐标  d 域名  a 全站  j 自定义JS  t 信任CA  p 系统代理  u 选校区  r 重启  l 清屏  q 退出 ";
     execute!(out, cursor::MoveTo(0, h.saturating_sub(1)), Print(trunc(foot, w)))?;
     out.flush()?;
     Ok(())
