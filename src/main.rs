@@ -173,7 +173,7 @@ fn plain() {
             if app.sysproxy { "开" } else { "关" }, app.count());
         println!("坐标:{:.6},{:.6}  精度:{:.0}m  域名:{}", app.cfg.lat, app.cfg.lon, app.cfg.acc,
             if app.cfg.all_hosts { "*".to_string() } else { app.cfg.domains.join(",") });
-        println!("命令: s 启停  c 坐标(自定义/选高校)  d 域名  a 全站  j 自定义JS  t 信任CA  p 系统代理  r 重启  q 退出");
+        println!("命令: s 启停  c 坐标  d 域名  a 全站  j 自定义JS  t 信任CA  p 系统代理  r 重启  q 退出");
         let mut line = String::new();
         print!("> ");
         let _ = io::stdout().flush();
@@ -447,7 +447,7 @@ impl Ui {
         let skip = logs.len().saturating_sub(inner_h);
         let lines: Vec<Line> = logs.iter().skip(skip).map(|l| Line::from(l.clone())).collect();
         f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" 日志 ")), chunks[1]);
-        let hint = " s 启停  c 坐标(自定义/选高校)  d 域名  a 全站  j JS  t 信任CA  p 系统代理  r 重启  l 清屏  q 退出 ";
+        let hint = " s 启停  c 坐标  d 域名  a 全站  j JS  t 信任CA  p 系统代理  r 重启  l 清屏  q 退出 ";
         f.render_widget(Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(Color::Black).bg(Color::Gray)))), chunks[2]);
     }
 
