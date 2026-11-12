@@ -1,0 +1,68 @@
+name: release
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: wxgeo-macos-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            asset: wxgeo-macos-x86_64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            asset: wxgeo-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: wxgeo-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: package unix
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf "$GITHUB_WORKSPACE/${{ matrix.asset }}.tar.gz" wxgeo
+      - name: package windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/wxgeo.exe" -DestinationPath "$env:GITHUB_WORKSPACE/${{ matrix.asset }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}.tar.gz
+            ${{ matrix.asset }}.zip
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: list
+        run: ls -l dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
