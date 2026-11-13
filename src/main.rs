@@ -3,6 +3,7 @@ mod ca;
 mod campus;
 mod config;
 mod inject;
+mod mappick;
 mod proxy;
 mod sysproxy;
 
@@ -71,6 +72,25 @@ impl App {
         g.push_back(format!("{} {}", now(), m));
         while g.len() > 800 { g.pop_front(); }
     }
+    fn active(&self) -> bool { self.proxy.is_some() }
+    fn start_all(&mut self) {
+        self.start();
+        if !self.active() {
+            self.push("代理未启动，已跳过 CA 与系统代理".into());
+            return;
+        }
+        match sysproxy::trust_ca() {
+            Ok(_) => self.push("已信任本地 CA".into()),
+            Err(e) => self.push(format!("CA 信任失败: {}", e)),
+        }
+        self.set_sysproxy(true);
+    }
+    fn stop_all(&mut self) {
+        self.stop();
+        if self.sysproxy { self.set_sysproxy(false); }
+        let _ = sysproxy::untrust_ca();
+    }
+    fn toggle_all(&mut self) { if self.active() { self.stop_all(); } else { self.start_all(); } }
     fn set_sysproxy(&mut self, on: bool) {
         match sysproxy::system_proxy(on, self.cfg.port) {
             Ok(m) => { self.sysproxy = on; self.push(format!("系统代理{}（{}）", if on { "开启" } else { "关闭" }, m)); }
@@ -173,19 +193,21 @@ fn plain() {
             if app.sysproxy { "开" } else { "关" }, app.count());
         println!("坐标:{:.6},{:.6}  精度:{:.0}m  域名:{}", app.cfg.lat, app.cfg.lon, app.cfg.acc,
             if app.cfg.all_hosts { "*".to_string() } else { app.cfg.domains.join(",") });
-        println!("命令: s 启停  c 坐标  d 域名  a 全站  j 自定义JS  t 信任CA  p 系统代理  r 重启  q 退出");
+        println!("命令: s 启停(含CA与系统代理)  c 坐标  d 域名  a 全站  j 自定义JS  r 重启  q 退出");
         let mut line = String::new();
         print!("> ");
         let _ = io::stdout().flush();
         if io::stdin().read_line(&mut line).is_err() { break; }
         match line.trim() {
             "q" => break,
-            "s" => { if app.proxy.is_some() { app.stop(); } else { app.start(); } }
-            "r" => { app.stop(); app.start(); }
+            "s" => app.toggle_all(),
+            "r" => { app.stop_all(); app.start_all(); }
             "c" => {
-                let m = ask_line("1 自定义坐标  2 选择高校", "1");
+                let m = ask_line("1 自定义坐标  2 选择高校  3 地图选点", "1");
                 if m.trim() == "2" {
                     plain_campus(&mut app);
+                } else if m.trim() == "3" {
+                    plain_map(&mut app);
                 } else {
                     let v = ask_line("纬度", &app.cfg.lat.to_string());
                     if let Ok(x) = v.parse() { app.cfg.lat = x; }
@@ -203,16 +225,10 @@ fn plain() {
             }
             "a" => { app.cfg.all_hosts = !app.cfg.all_hosts; app.cfg.save(); }
             "j" => { app.cfg.extra_js = ask_line("自定义JS单行", &app.cfg.extra_js); app.cfg.save(); }
-            "t" => {
-                if sysproxy::ca_trusted() { let _ = sysproxy::untrust_ca(); app.push("已移除 CA 信任".into()); }
-                else { match sysproxy::trust_ca() { Ok(_) => app.push("已信任本地 CA".into()), Err(e) => app.push(format!("信任失败: {}", e)) } }
-            }
-            "p" => { let target = !app.sysproxy; app.set_sysproxy(target); }
             _ => {}
         }
     }
-    app.stop();
-    if app.sysproxy { app.set_sysproxy(false); }
+    app.stop_all();
     println!("已退出");
 }
 
@@ -230,6 +246,30 @@ fn plain_campus(app: &mut App) {
             app.cfg.lat = c.lat; app.cfg.lon = c.lon; app.cfg.save();
             println!("已选择 {}（{:.6},{:.6}）", c.name, c.lat, c.lon);
         }
+    }
+}
+
+fn plain_map(app: &mut App) {
+    match mappick::start() {
+        Ok(mp) => {
+            let url = format!("http://127.0.0.1:{}/", mp.port);
+            println!("已启动地图选点服务: {}", url);
+            mappick::open_browser(&url);
+            println!("请在浏览器中选点并确认，最长等待 180 秒（Ctrl-C 取消）…");
+            let mut got = None;
+            for _ in 0..1800 {
+                if let Some(v) = *mp.result.lock().unwrap() { got = Some(v); break; }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            mp.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some((lat, lon)) = got {
+                app.cfg.lat = lat; app.cfg.lon = lon; app.cfg.save();
+                println!("已回填坐标 {:.6},{:.6}", lat, lon);
+            } else {
+                println!("未收到选点结果");
+            }
+        }
+        Err(e) => println!("地图服务启动失败: {}", e),
     }
 }
 
@@ -258,6 +298,7 @@ enum Mode {
     Campus { query: String, sel: usize, offset: usize },
     CoordInput { field: u8, buf: String },
     TextInput { kind: TextKind, buf: String },
+    MapPick,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -267,13 +308,14 @@ struct Ui {
     app: App,
     mode: Mode,
     campus_list: Vec<usize>,
+    mappick: Option<mappick::MapPick>,
 }
 
 impl Ui {
     fn new() -> Ui {
         let app = App::new();
         let n = app.campuses.len();
-        Ui { app, mode: Mode::Main, campus_list: (0..n).collect() }
+        Ui { app, mode: Mode::Main, campus_list: (0..n).collect(), mappick: None }
     }
 
     fn refilter(&mut self, query: &str) {
@@ -309,8 +351,21 @@ impl Ui {
                     running = self.handle(k);
                 }
             }
+            if let Some(mp) = &self.mappick {
+                let v = *mp.result.lock().unwrap();
+                if let Some((lat, lon)) = v {
+                    self.app.cfg.lat = lat;
+                    self.app.cfg.lon = lon;
+                    self.app.cfg.save();
+                    self.app.push(format!("地图选点回填 {:.6},{:.6}", lat, lon));
+                    mp.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    self.mappick = None;
+                    self.mode = Mode::Main;
+                }
+            }
         }
-        self.app.stop();
+        if let Some(mp) = self.mappick.take() { mp.stop.store(true, std::sync::atomic::Ordering::Relaxed); }
+        self.app.stop_all();
         if self.app.sysproxy { self.app.set_sysproxy(false); }
         crossterm::execute!(term.backend_mut(), terminal::LeaveAlternateScreen)?;
         terminal::disable_raw_mode()?;
@@ -324,30 +379,35 @@ impl Ui {
         match mode {
             Mode::Main => match key.code {
                 K::Char('q') => return false,
-                K::Char('s') => { if self.app.proxy.is_some() { self.app.stop(); } else { self.app.start(); } }
-                K::Char('r') => { self.app.stop(); self.app.start(); }
+                K::Char('s') => self.app.toggle_all(),
+                K::Char('r') => { self.app.stop_all(); self.app.start_all(); }
                 K::Char('c') => { self.mode = Mode::CoordMenu { sel: 0 }; return true; }
                 K::Char('d') => { self.mode = Mode::TextInput { kind: TextKind::Domains, buf: self.app.cfg.domains.join(",") }; return true; }
                 K::Char('a') => { self.app.cfg.all_hosts = !self.app.cfg.all_hosts; self.app.cfg.save(); }
                 K::Char('j') => { self.mode = Mode::TextInput { kind: TextKind::Js, buf: self.app.cfg.extra_js.clone() }; return true; }
-                K::Char('t') => {
-                    if sysproxy::ca_trusted() { let _ = sysproxy::untrust_ca(); self.app.push("已移除 CA 信任".into()); }
-                    else { match sysproxy::trust_ca() { Ok(_) => self.app.push("已信任本地 CA".into()), Err(e) => self.app.push(format!("信任失败: {}", e)) } }
-                }
-                K::Char('p') => { let t = !self.app.sysproxy; self.app.set_sysproxy(t); }
                 K::Char('l') => { self.app.shared.lock().unwrap().clear(); }
                 _ => {}
             },
             Mode::CoordMenu { sel } => match key.code {
                 K::Esc | K::Char('q') => self.mode = Mode::Main,
                 K::Up | K::Char('k') => self.mode = Mode::CoordMenu { sel: sel.saturating_sub(1) },
-                K::Down | K::Char('j') => self.mode = Mode::CoordMenu { sel: (sel + 1).min(1) },
+                K::Down | K::Char('j') => self.mode = Mode::CoordMenu { sel: (sel + 1).min(2) },
                 K::Enter | K::Char(' ') => {
-                    if sel == 1 {
-                        self.refilter("");
-                        self.mode = Mode::Campus { query: String::new(), sel: 0, offset: 0 };
-                    } else {
-                        self.mode = Mode::CoordInput { field: 0, buf: format!("{}", self.app.cfg.lat) };
+                    match sel {
+                        1 => { self.refilter(""); self.mode = Mode::Campus { query: String::new(), sel: 0, offset: 0 }; }
+                        2 => {
+                            match mappick::start() {
+                                Ok(mp) => {
+                                    let url = format!("http://127.0.0.1:{}/", mp.port);
+                                    mappick::open_browser(&url);
+                                    self.app.push(format!("已打开地图选点: {}", url));
+                                    self.mappick = Some(mp);
+                                    self.mode = Mode::MapPick;
+                                }
+                                Err(e) => { self.app.push(format!("地图服务启动失败: {}", e)); self.mode = Mode::CoordMenu { sel }; }
+                            }
+                        }
+                        _ => { self.mode = Mode::CoordInput { field: 0, buf: format!("{}", self.app.cfg.lat) }; }
                     }
                 }
                 _ => self.mode = Mode::CoordMenu { sel },
@@ -397,6 +457,12 @@ impl Ui {
                 }
                 _ => self.mode = Mode::CoordInput { field, buf },
             },
+            Mode::MapPick => {
+                if matches!(key.code, K::Esc | K::Char('q')) {
+                    if let Some(mp) = self.mappick.take() { mp.stop.store(true, std::sync::atomic::Ordering::Relaxed); }
+                    self.mode = Mode::CoordMenu { sel: 2 };
+                } else { self.mode = Mode::MapPick; }
+            }
             Mode::TextInput { kind, mut buf } => match key.code {
                 K::Esc => self.mode = Mode::Main,
                 K::Backspace => { buf.pop(); self.mode = Mode::TextInput { kind, buf }; }
@@ -424,17 +490,17 @@ impl Ui {
             Mode::Campus { query, sel, offset } => self.draw_campus(f, query, *sel, *offset),
             Mode::CoordInput { field, buf } => { self.draw_main(f); self.draw_input(f, &coord_label(*field), buf); }
             Mode::TextInput { kind, buf } => { self.draw_main(f); self.draw_input(f, if *kind == TextKind::Domains { "域名(逗号分隔)" } else { "自定义JS" }, buf); }
+            Mode::MapPick => { self.draw_main(f); self.draw_map(f); }
         }
     }
 
     fn draw_main(&self, f: &mut Frame) {
         let area = f.area();
-        let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(3), Constraint::Length(2)]).split(area);
+        let chunks = Layout::vertical([Constraint::Length(2), Constraint::Min(3), Constraint::Length(2)]).split(area);
         let on = self.app.proxy.is_some();
         let header = vec![
-            Line::from(Span::styled(" wxgeo 微信定位伪装 TUI ", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
-            Line::from(format!(" 代理:{}  端口:{}  CA:{}  系统代理:{}  请求:{}",
-                if on { "运行" } else { "停止" }, self.app.cfg.port,
+            Line::from(format!(" 服务:{}  端口:{}  CA:{}  系统代理:{}  请求:{}",
+                if on { "开启" } else { "关闭" }, self.app.cfg.port,
                 if sysproxy::ca_trusted() { "已信任" } else { "未信任" },
                 if self.app.sysproxy { "开" } else { "关" }, self.app.count())),
             Line::from(format!(" 坐标:{:.6},{:.6} 精度:{:.0}m  范围:{}",
@@ -447,14 +513,14 @@ impl Ui {
         let skip = logs.len().saturating_sub(inner_h);
         let lines: Vec<Line> = logs.iter().skip(skip).map(|l| Line::from(l.clone())).collect();
         f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" 日志 ")), chunks[1]);
-        let hint = " s 启停  c 坐标  d 域名  a 全站  j JS  t 信任CA  p 系统代理  r 重启  l 清屏  q 退出 ";
+        let hint = " s 启停(含CA与系统代理)  c 坐标  d 域名  a 全站  j JS  r 重启  l 清屏  q 退出 ";
         f.render_widget(Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(Color::Black).bg(Color::Gray)))), chunks[2]);
     }
 
     fn draw_coord_menu(&self, f: &mut Frame, sel: usize) {
-        let area = centered_rect(46, 32, f.area());
+        let area = centered_rect(46, 40, f.area());
         f.render_widget(Clear, area);
-        let items = ["1. 自定义坐标", "2. 选择高校"];
+        let items = ["1. 自定义坐标", "2. 选择高校", "3. 地图选点"];
         let lines: Vec<Line> = items.iter().enumerate().map(|(i, t)| {
             if i == sel { Line::from(Span::styled(format!(" {} ", t), Style::default().bg(Color::Blue).fg(Color::White))) }
             else { Line::from(format!(" {} ", t)) }
@@ -489,6 +555,22 @@ impl Ui {
         f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)), chunks[1]);
         let hint = " 输入前缀筛选  ↑↓/jk 选择  PgUp/PgDn 翻页  Enter 确认  Esc 返回 ";
         f.render_widget(Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(Color::Black).bg(Color::Gray)))), chunks[2]);
+    }
+
+    fn draw_map(&self, f: &mut Frame) {
+        let area = centered_rect(64, 26, f.area());
+        f.render_widget(Clear, area);
+        let url = self.mappick.as_ref().map(|m| format!("http://127.0.0.1:{}/", m.port)).unwrap_or_default();
+        let lines = vec![
+            Line::from("请在已打开的浏览器页面中点击地图选点，然后点确认。"),
+            Line::from(""),
+            Line::from(Span::styled(url, Style::default().fg(Color::Cyan))),
+            Line::from(""),
+            Line::from("收到坐标后将自动回填并关闭本窗口。"),
+        ];
+        f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" 地图选点 ")), area);
+        let h = f.area().height.saturating_sub(1);
+        f.render_widget(Paragraph::new(Line::from(Span::styled(" 等待浏览器返回…   Esc 取消 ", Style::default().fg(Color::Black).bg(Color::Gray)))), Rect { x: 0, y: h, width: f.area().width, height: 1 });
     }
 
     fn draw_input(&self, f: &mut Frame, label: &str, buf: &str) {

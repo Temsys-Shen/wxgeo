@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>地图选点</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+html,body{height:100%;margin:0;font:14px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+#map{position:absolute;inset:0}
+#panel{position:absolute;z-index:1000;top:12px;left:12px;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.18);max-width:320px}
+#panel input{width:96px}
+#panel button{margin-top:6px;padding:6px 12px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer}
+#panel button:disabled{background:#9ca3af}
+#msg{color:#059669;margin-top:6px;display:none}
+</style></head><body>
+<div id="map"></div>
+<div id="panel">
+  <div><b>点击地图选点</b>，或用下方输入框填写坐标。</div>
+  <div style="margin-top:6px">纬度 <input id="lat" placeholder="30.678232"> 经度 <input id="lon" placeholder="104.098004"></div>
+  <div><button id="ok" disabled>确认并回填</button></div>
+  <div id="msg">已提交，请返回终端。</div>
+</div>
+<script>
+var map = L.map('map').setView([34.5, 105.0], 4);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+var marker = null;
+function setPoint(lat, lon, center) {
+  document.getElementById('lat').value = lat.toFixed(6);
+  document.getElementById('lon').value = lon.toFixed(6);
+  document.getElementById('ok').disabled = false;
+  if (marker) { marker.setLatLng([lat, lon]); } else { marker = L.marker([lat, lon]).addTo(map); }
+  if (center) { map.setView([lat, lon], 15); }
+}
+map.on('click', function (e) { setPoint(e.latlng.lat, e.latlng.lng, false); });
+document.getElementById('ok').onclick = function () {
+  var lat = parseFloat(document.getElementById('lat').value);
+  var lon = parseFloat(document.getElementById('lon').value);
+  if (isNaN(lat) || isNaN(lon)) { alert('坐标无效'); return; }
+  fetch('/pick', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat: lat, lon: lon })
+  }).then(function () {
+    document.getElementById('msg').style.display = 'block';
+  }).catch(function () { alert('提交失败'); });
+};
+</script></body></html>
