@@ -12,12 +12,17 @@ html,body{height:100%;margin:0;font:14px -apple-system,BlinkMacSystemFont,"PingF
 #panel button{margin-top:6px;padding:6px 12px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer}
 #panel button:disabled{background:#9ca3af}
 #msg{color:#059669;margin-top:6px;display:none}
+#results{max-height:180px;overflow:auto;margin-top:4px}
+.res{padding:4px 6px;cursor:pointer;border-bottom:1px solid #eee}
+.res:hover{background:#f1f5f9}
 </style></head><body>
 <div id="map"></div>
 <div id="panel">
   <div><b>点击地图选点</b>，或用下方输入框填写坐标。</div>
   <div style="margin-top:6px">纬度 <input id="lat" placeholder="30.678232"> 经度 <input id="lon" placeholder="104.098004"></div>
-  <div><button id="ok" disabled>确认并回填</button></div>
+  <div style="margin-top:8px"><input id="q" placeholder="搜索地点或学校" style="width:190px"> <button id="search">搜索</button></div>
+  <div id="results"></div>
+  <div><button id="ok" disabled>确认</button></div>
   <div id="msg">已提交，请返回终端。</div>
 </div>
 <script>
@@ -35,6 +40,27 @@ function setPoint(lat, lon, center) {
   if (center) { map.setView([lat, lon], 15); }
 }
 map.on('click', function (e) { setPoint(e.latlng.lat, e.latlng.lng, false); });
+function doSearch() {
+  var q = document.getElementById('q').value.trim();
+  if (!q) { return; }
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=8&accept-language=zh-CN&q=' + encodeURIComponent(q))
+    .then(function (r) { return r.json(); })
+    .then(function (list) {
+      var box = document.getElementById('results');
+      box.innerHTML = '';
+      list.forEach(function (it) {
+        var d = document.createElement('div');
+        d.className = 'res';
+        d.textContent = it.display_name;
+        d.onclick = function () { setPoint(parseFloat(it.lat), parseFloat(it.lon), true); box.innerHTML = ''; };
+        box.appendChild(d);
+      });
+      if (!list.length) { box.textContent = '无结果'; }
+    })
+    .catch(function () { document.getElementById('results').textContent = '搜索失败'; });
+}
+document.getElementById('search').onclick = doSearch;
+document.getElementById('q').addEventListener('keydown', function (e) { if (e.key === 'Enter') { doSearch(); } });
 document.getElementById('ok').onclick = function () {
   var lat = parseFloat(document.getElementById('lat').value);
   var lon = parseFloat(document.getElementById('lon').value);
