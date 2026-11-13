@@ -2,13 +2,22 @@
 
 微信内置浏览器定位伪装工具：本机 MITM 代理，对目标站点 HTML 注入定位脚本。支持 macOS、Linux、Windows。
 
+## 安装
+
+```
+cargo install wxgeo          # 从 crates.io
+cargo install --git https://github.com/Temsys-Shen/wxgeo   # 从源码
+```
+
+或从 Releases 下载预编译包。
+
 ## 构建
 
 ```
 cargo build --release
 ```
 
-产物：`target/release/wxgeo`。各平台预编译包见 Releases。
+产物：`target/release/wxgeo`。
 
 ## 使用
 

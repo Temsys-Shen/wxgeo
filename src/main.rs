@@ -11,7 +11,7 @@ use anyhow::Result;
 use config::Config;
 use proxy::{LogFn, ProxyServer};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Frame, Terminal};
@@ -410,7 +410,7 @@ impl Ui {
                 }
                 _ => self.mode = Mode::CoordMenu { sel },
             },
-            Mode::Campus { mut query, mut sel, mut offset } => match key.code {
+            Mode::Campus { mut query, mut sel, offset } => match key.code {
                 K::Esc => self.mode = Mode::CoordMenu { sel: 1 },
                 K::Up | K::Char('k') => { if sel > 0 { sel -= 1; } self.mode = Mode::Campus { query, sel, offset }; }
                 K::Down | K::Char('j') => { if sel + 1 < self.campus_list.len() { sel += 1; } self.mode = Mode::Campus { query, sel, offset }; }
