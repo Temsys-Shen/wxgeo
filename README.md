@@ -1,6 +1,6 @@
 # wxgeo
 
-微信内置浏览器定位伪装工具：本机 MITM 代理，对目标站点 HTML 注入定位脚本。支持 macOS、Linux、Windows。
+微信内置浏览器及网页定位伪装工具：本机 MITM 代理，对目标站点 HTML 注入定位脚本，代理 `navigator.geolocation` 和 `wx.getLocation` 的返回坐标。支持 macOS、Linux、Windows。
 
 仅供学习交流，不建议用于问卷星位置签到等非法用途。
 
@@ -11,7 +11,7 @@ cargo install wxgeo          # 从 crates.io
 cargo install --git https://github.com/Temsys-Shen/wxgeo   # 从源码
 ```
 
-或从 Releases 下载预编译包。
+或从 [Releases](https://github.com/Temsys-Shen/wxgeo/releases) 下载预编译包。
 
 ## 构建
 
@@ -24,11 +24,11 @@ cargo build --release
 ## 使用
 
 ```
-wxgeo                  # TUI
-wxgeo --plain          # 文本界面
-wxgeo --headless       # 前台运行并打印日志
-wxgeo --selftest [URL] # 自检
-wxgeo --update-campus-db
+wxgeo                    # TUI
+wxgeo --plain            # 文本界面
+wxgeo --headless         # 前台运行并打印日志
+wxgeo --selftest [URL]   # 自检
+wxgeo --update-campus-db # 更新坐标数据库
 ```
 
 Linux 安装 CA 需要 root：`sudo wxgeo`。
@@ -49,7 +49,7 @@ Linux 安装 CA 需要 root：`sudo wxgeo`。
 ## 坐标来源
 
 - 内置高校校区库，数据来自 Wikidata
-- 地图选点：`assets/map.html` 本地页面，浏览器中点击或搜索后确认回填
+- 地图选点：浏览器中点击或搜索后确认回填
 - 手工输入经纬度
 
 ## 配置
